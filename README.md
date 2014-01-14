@@ -8,4 +8,4 @@ This little piece of code solves the problem, using [Mailgun][1] and [Embed.ly][
 
 
   [1]: http://mailgun.com/
-  [2]: http://embed.ly/ "Embed.ly"
+  [2]: http://embed.ly/
