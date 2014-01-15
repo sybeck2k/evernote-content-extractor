@@ -4,9 +4,12 @@
   "version": "0.0.1",
   "private": true,
   "dependencies": {
-    "express": "3.x",
-    "embedly": "1.x",
-    "winston": "*",
-    "nodemailer": "*"
+    "express"           : "3.x",
+    "embedly"           : "1.x",
+    "winston"           : "*",
+    "nodemailer"        : "*",
+    "evernote"          : "*",
+    "node.extend"       : "*",
+    "connect-multiparty": "1.x"
   }
 }

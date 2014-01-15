@@ -1,14 +1,49 @@
-var express = require('express')
-    app = express(),
-    embedly = require('embedly'),
-    util = require('util'),
-    winston = require('winston'),
+var express     = require('express'),
+    embedly     = require('embedly'),
+    winston     = require('winston'),
+    util        = require('util'),
+    http        = require('http'),
+    nodemailer  = require("nodemailer"),
+    fs          = require('fs'),
+    crypto      = require('crypto'),
+    Evernote    = require('evernote').Evernote,
+    multipart   = require('connect-multiparty'),
+    user_config = require('./config.json');
+
+var app    = express(),
     logger = new (winston.Logger)({
         transports: [new (winston.transports.Console)({ level: 'info' })]
-    }),
-    http = require('http'),
-    user_config = require('./config.json'),
-    nodemailer = require("nodemailer");
+    });
+
+var multipartMiddleware = multipart();
+
+//instanciate Evernote client
+var client = new Evernote.Client({token: user_config.evernote_dev_token, sandbox: false});
+
+var userStore = client.getUserStore();
+
+userStore.checkVersion(
+  "Evernote EDAMTest (Node.js)",
+  Evernote.EDAM_VERSION_MAJOR,
+  Evernote.EDAM_VERSION_MINOR,
+  function(err, versionOk) {
+    if (!versionOk) {
+      console.log("Evernote API out of sync, please update with NPM");
+      process.exit(1);
+    }
+  }
+);
+
+var noteStore = client.getNoteStore();
+
+// List all of the notebooks in the user's account
+var notebooks = noteStore.listNotebooks(function(err, notebooks) {
+  console.log("Found " + notebooks.length + " notebooks:");
+  for (var i in notebooks) {
+    console.log(" * " + notebooks[i].name);
+  }
+});
+
 
 // create reusable transport method (opens pool of SMTP connections)
 var smtpTransport = nodemailer.createTransport("SMTP",{
@@ -20,46 +55,37 @@ var smtpTransport = nodemailer.createTransport("SMTP",{
 });
 
 // setup e-mail data with unicode symbols
-var mailOptions = {
-    from: "Evernote Bouncer <evernote-bouncer@mg.myebofthings.com>", // sender address
-    to: "robertomigli@gmail.com", // list of receivers
+var default_mail_options = {
+    from: "", // sender address
+    to: "", // list of receivers
     subject: "Hello!", // Subject line
     text: "Hello world", // plaintext body
     html: "<b>Hello world</b>" // html body
-}
+};
+
+
+var app = express();
 
 // Configurations
-app.configure(function(){
-  app.use(express.logger('dev'));
-  app.use(express.urlencoded());
-});
+app.use(express.logger('dev'));
+app.use(express.urlencoded());
+
 
 app.configure('development', function(){
   app.use(express.errorHandler());
 });
 
-
-var app = express();
-
 app.post('/evernote/mail', function(req, res){
-  console.log(req);
-  res.send('OK');
   var sender        = req.body.sender,
       recipient     = req.body.recipient,
       subject       = req.body.subject || "",
       body_plain    = req.body['body-plain'] || "",
-      stripped_text = req.body['stripped-text'] || "";
+      stripped_text = req.body['stripped-text'] || "",
+      extend        = require('node.extend');
 
-      console.log(req.body)
-/*
-  // send mail with defined transport object
-  smtpTransport.sendMail(mailOptions, function(error, response){
-      if(error){
-          console.log(error);
-      }else{
-          console.log("Message sent: " + response.message);
-      }
-  });
+  console.log(sender,recipient,subject,body_plain,stripped_text);
+  res.send('OK');
+  /*
   new embedly({key: user_config.embedly_api_key, logger: logger}, function(err, api) {
     var url = ('http://www.guardian.co.uk/media/2011/jan' +
                '/21/andy-coulson-phone-hacking-statement');
@@ -73,9 +99,18 @@ app.post('/evernote/mail', function(req, res){
       console.log('3. ');
       console.log(util.inspect(objs[0]));
     });
-  });*/
-  res.send('OK');
+  });
+  // send mail with defined transport object
+  smtpTransport.sendMail(mailOptions, function(error, response){
+      if(error){
+          console.log(error);
+      }else{
+          console.log("Message sent: " + response.message);
+      }
+  });
+  */
 });
+
 var server = http.createServer(app);
 server.listen(process.env.PORT || 2378);
 console.log('Express server started on port %s', server.address().port);
