@@ -63,7 +63,6 @@ var default_mail_options = {
     html: "<b>Hello world</b>" // html body
 };
 
-
 var app = express();
 
 // Configurations
@@ -81,25 +80,43 @@ app.post('/evernote/mail', function(req, res){
       subject       = req.body.subject || "",
       body_plain    = req.body['body-plain'] || "",
       stripped_text = req.body['stripped-text'] || "",
-      extend        = require('node.extend');
+      extend        = require('node.extend'),
+      urlArray      = [],
+      matchArray    = [];
 
   console.log(sender,recipient,subject,body_plain,stripped_text);
-  res.send('OK');
-  /*
+
+  // Regular expression to find FTP, HTTP(S) and email URLs.
+  var regexToken = /((https?:\/\/)[\-\w@:%_\+.~#?,&\/\/=]+)/g;
+
+  // Iterate through any URLs in the text.
+  while( (matchArray = regexToken.exec( body_plain )) !== null ) {
+      var token = matchArray[0];
+      urlArray.push( token );
+  }
+
+  var opts = {
+    urls      : urlArray,
+    maxWidth  : 450,
+    maxHeight : 450
+  };
+  
   new embedly({key: user_config.embedly_api_key, logger: logger}, function(err, api) {
-    var url = ('http://www.guardian.co.uk/media/2011/jan' +
-               '/21/andy-coulson-phone-hacking-statement');
-    api.extract({url: url}, function(err, objs) {
+    api.extract(opts, function(err, api_return_values) {
       if (!!err) {
-        console.error('request #2 failed');
-        console.error(err.stack, objs);
+        console.error(err.stack, api_return_values);
         return;
       }
-      console.log('---------------------------------------------------------');
-      console.log('3. ');
-      console.log(util.inspect(objs[0]));
+      api_return_values.forEach(function(api_return_value){
+        /*api_return_value.description
+        api_return_value.content
+        api_return_value.url*/
+      });
     });
   });
+
+  res.send('OK');
+  /*
   // send mail with defined transport object
   smtpTransport.sendMail(mailOptions, function(error, response){
       if(error){
