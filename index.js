@@ -7,17 +7,13 @@ var express     = require('express'),
     fs          = require('fs'),
     crypto      = require('crypto'),
     Evernote    = require('evernote').Evernote,
-    multipart   = require('connect-multiparty'),
     user_config = require('./config.json');
-
-require('fibrous');
 
 var app    = express(),
     logger = new (winston.Logger)({
         transports: [new (winston.transports.Console)({ level: 'info' })]
     });
 
-var multipartMiddleware = multipart();
 
 //instanciate Evernote client
 var client = new Evernote.Client({token: user_config.evernote_dev_token, sandbox: false});
