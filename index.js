@@ -95,7 +95,6 @@ app.post('/evernote/mail', verify_mailgun_call, function(req, res){
       subject       = req.body.subject || "",
       body_plain    = req.body['body-plain'] || "",
       stripped_text = req.body['stripped-text'] || "",
-      extend        = require('node.extend'),
       urlArray      = [],
       matchArray    = [];
 
