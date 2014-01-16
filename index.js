@@ -7,6 +7,7 @@ var express     = require('express'),
     fs          = require('fs'),
     crypto      = require('crypto'),
     Evernote    = require('evernote').Evernote,
+    Q           = require('q'),
     user_config = require('./config.json');
 
 var app    = express(),
@@ -31,25 +32,36 @@ userStore.checkVersion(
     }
   }
 );
+
 var noteStore = client.getNoteStore();
 
-// create reusable transport method (opens pool of SMTP connections)
-var smtpTransport = nodemailer.createTransport("SMTP",{
-    host: user_config.smtp.hostname,
-    auth: {
-        user: user_config.smtp.login,
-        pass: user_config.smtp.password,
-    }
-});
-
-// setup e-mail data with unicode symbols
-var default_mail_options = {
-    from: "", // sender address
-    to: "", // list of receivers
-    subject: "Hello!", // Subject line
-    text: "Hello world", // plaintext body
-    html: "<b>Hello world</b>" // html body
+//create a deferred API call that returns a notebooks guid - from cache if available
+var known_notebook_guid = {};
+var deferredListNotebooks = function (notebook) {
+  var deferred = Q.defer();
+  if (notebook in known_notebook_guid) {
+    deferred.resolve(known_notebook_guid[notebook]);
+  } else {
+    var notebooks = noteStore.listNotebooks(function(err, notebooks) {
+      if (err) {
+        deferred.reject(err);
+      } else {
+        for (var i in notebooks) {
+          known_notebook_guid[notebooks[i].name] = notebooks[i].guid;
+        }
+        if (notebook in known_notebook_guid) {
+          deferred.resolve(known_notebook_guid[notebook]);
+        } else {
+          deferred.resolve(null);
+        }
+      }
+      return deferred.promise;
+    });
+  }
+  return deferred.promise;
 };
+
+
 
 var verify_mailgun_call = function(req, res, next) {
   if (req.body.timestamp === undefined || req.body.token === undefined) {
@@ -96,79 +108,76 @@ app.post('/evernote/mail', verify_mailgun_call, function(req, res){
   }
 
   var target_notebook_guid;
-  if (!(target_notebook in known_notebook_guid)) {
-    //extract the notebookGuid (@todo make it syncronous!)
-    var notebooks = noteStore.listNotebooks(function(err, notebooks) {
-      for (var i in notebooks) {
-        known_notebook_guid[notebooks[i].name] = notebooks[i].Guid;
-      }
-      if (target_notebook in known_notebook_guid) {
-        target_notebook_guid = known_notebook_guid[target_notebook];
-      } else {
-        console.warn("Unknown notebook " + target_notebook);
-        console.log(known_notebook_guid);
-      }
-    }); 
-  }
-   
-  // Regular expression to find HTTP(S) URLs
-  var regexToken = /((https?:\/\/)[\-\w@:%_\+.~#?,&\/\/=]+)/g;
 
-  // Iterate through any URLs in the text.
-  while( (matchArray = regexToken.exec( body_plain )) !== null ) {
-      var token = matchArray[0];
-      urlArray.push( token );
-  }
+  //let's give some synch
+  //...get the target notebook GUID (from cache or new API call)
+  deferredListNotebooks(target_notebook)
+  .then(function (target_notebook_guid) {
+    // Regular expression to find HTTP(S) URLs
+    var regexToken = /((https?:\/\/)[\-\w@:%_\+.~#?,&\/\/=]+)/g;
 
-  var opts = {
-    urls      : urlArray,
-    maxWidth  : 450,
-    maxHeight : 450
-  };
-  
-  new embedly({key: user_config.embedly_api_key, logger: logger}, function(err, api) {
-    api.extract(opts, function(err, api_return_values) {
-      if (!!err) {
-        console.error(err.stack, api_return_values);
-        return;
-      }
-      var is_multi_url = false;
-      if (api_return_values.length > 1) {
-        is_multi_url = true;
-      }
-      api_return_values.forEach(function(api_return_value){
-        //everything seems good - create the note
-        var note = new Evernote.Note();
+    // Iterate through any URLs in the text.
+    while( (matchArray = regexToken.exec( body_plain )) !== null ) {
+        var token = matchArray[0];
+        urlArray.push( token );
+    }
 
-        note.title = is_multi_url ?  api_return_value.title : subject;
-
-        var note_content = api_return_value.content || api_return_value.description || api_return_value.title;
-        note_content = note_content.replace(/\n/g, '<br />').replace(/\t/g, '');
-        note_content = note_content.replace(/<br>/g, '<br />'); //this is a temporary fix!
-        note.content = '<?xml version="1.0" encoding="UTF-8"?>';
-        note.content += '<!DOCTYPE en-note SYSTEM "http://xml.evernote.com/pub/enml2.dtd">';
-        note.content += '<en-note>';
-        note.content += note_content;
-        note.content += "<br /><br />";
-        note.content += "Source: " + api_return_value.url;
-        note.content += '</en-note>';
-
-        if (target_notebook_guid) {
-          note.notebookGuid = target_notebook_guid;
+    var opts = {
+      urls      : urlArray,
+      maxWidth  : 450,
+      maxHeight : 450
+    };
+    
+    new embedly({key: user_config.embedly_api_key, logger: logger}, function(err, api) {
+      api.extract(opts, function(err, api_return_values) {
+        if (!!err) {
+          console.error(err.stack, api_return_values);
+          return;
         }
-        noteStore.createNote(note, function(err, createdNote) {
-          if (!!err) {
-            console.error(err, note.title, note.content);
-            return;
-          }
+        var is_multi_url = false;
+        if (api_return_values.length > 1) {
+          is_multi_url = true;
+        }
+        api_return_values.forEach(function(api_return_value){
+          //everything seems good - create the note
+          var note = new Evernote.Note();
 
+          note.title = is_multi_url ?  api_return_value.title : subject;
+
+          var note_content = api_return_value.content || api_return_value.description || api_return_value.title;
+          note_content = note_content.replace(/\n/g, '<br />').replace(/\t/g, '');
+          note_content = note_content.replace(/<br>/g, '<br />'); //this is a temporary fix!
+          note.content = '<?xml version="1.0" encoding="UTF-8"?>';
+          note.content += '<!DOCTYPE en-note SYSTEM "http://xml.evernote.com/pub/enml2.dtd">';
+          note.content += '<en-note>';
+          note.content += note_content;
+          note.content += "<br /><br />";
+          note.content += "Source: " + api_return_value.url;
+          note.content += '</en-note>';
+
+          if (target_notebook_guid) {
+            note.notebookGuid = target_notebook_guid;
+          }
+          noteStore.createNote(note, function(err, createdNote) {
+            if (!!err) {
+              console.error(err, note.title, note.content);
+              return;
+            }
+
+          });
+          /*api_return_value.description
+          api_return_value.content
+          api_return_value.url*/
         });
-        /*api_return_value.description
-        api_return_value.content
-        api_return_value.url*/
       });
     });
-  });
+  })
+  .catch(function (error) {
+      // Handle any error from all above steps
+      console.log(error);
+      process.exit(1);
+  })
+  .done();
 
   res.send('OK');
 });
