@@ -37,7 +37,7 @@ var noteStore = client.getNoteStore();
 
 //create a deferred API call that returns a notebooks guid - from cache if available
 var known_notebook_guid = {};
-var deferredListNotebooks = function (notebook) {
+var deferredGetNotebookGuid = function (notebook) {
   var deferred = Q.defer();
   if (notebook in known_notebook_guid) {
     deferred.resolve(known_notebook_guid[notebook]);
@@ -61,7 +61,52 @@ var deferredListNotebooks = function (notebook) {
   return deferred.promise;
 };
 
+//create a deferred API call that returns the tags Guid - from cache where available
+var known_tags = {};
+var deferredGetTagsGuid = function (tags) {
+  var deferred = Q.defer(),
+      indexed_tags_to_guid = {},
+      unknown_tags = [];
+  if (tags.isArray()) {
+    for (var iii in tags) {
+      indexed_tags_to_guid[tags[iii]] = null;
+    }
+  } else {
+    indexed_tags_to_guid[tags] = null;
+  }
 
+  for (var tag_name in indexed_tags_to_guid) {
+    if (tag_name in known_tags) {
+      indexed_tags_to_guid[tag_name] = known_tags[tag_name];
+    } else {
+      unknown_tags.push(tag);
+    }
+  }
+
+  if (unknown_tags.length === 0) {
+    deferred.resolve(tags_guid.length === 1 ? tags_guid.pop() : tags_guid);
+  } else {
+    //we have to pull the tags from the API
+    noteStore.listTags(function(err, tags) {
+      if (err) {
+        deferred.reject(err);
+      } else {
+        //cache the values and see if we were actually looking for it
+        for (var ii in tags) {
+          var tag = tags[ii];
+          known_tags[tag.name] = tag.guid;
+          if (indexed_tags_to_guid in tags) {
+            indexed_tags_to_guid[tag.name] = tag.guid;
+          }
+        }
+        //we might still be missing some tags, but pass control to someone else
+        deferred.resolve(indexed_tags_to_guid);
+      }
+      return deferred.promise;
+    });
+  }
+  return deferred.promise;
+};
 
 var verify_mailgun_call = function(req, res, next) {
   if (req.body.timestamp === undefined || req.body.token === undefined) {
@@ -106,17 +151,18 @@ app.post('/evernote/mail', verify_mailgun_call, function(req, res){
     subject = subject.replace(/@(.+)$/, "").replace(/^\s\s*/, '').replace(/\s\s*$/, '');
   }
 
-  var target_notebook_guid;
-
-  //let's give some synch
+  //let's give some asynchronous synchronization! @todo
+  /*q.spread([deferredGetNotebookGuid, p2,p3], function(target_notebook_guid), function(err) {
+        console.log(err):
+  });*/
   //...get the target notebook GUID (from cache or new API call)
-  deferredListNotebooks(target_notebook)
+  deferredGetNotebookGuid(target_notebook)
   .then(function (target_notebook_guid) {
     // Regular expression to find HTTP(S) URLs
-    var regexToken = /((https?:\/\/)[\-\w@:%_\+.~#?,&\/\/=]+)/g;
+    var url_regext_token = /((https?:\/\/)[\-\w@:%_\+.~#?,&\/\/=]+)/g;
 
     // Iterate through any URLs in the text.
-    while( (matchArray = regexToken.exec( body_plain )) !== null ) {
+    while( (matchArray = url_regext_token.exec( body_plain )) !== null ) {
         var token = matchArray[0];
         urlArray.push( token );
     }
